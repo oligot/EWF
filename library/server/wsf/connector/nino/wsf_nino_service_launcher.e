@@ -39,6 +39,9 @@ feature {NONE} -- Initialization
 			base_url := ""
 
 			if attached options as opts then
+				if attached {READABLE_STRING_GENERAL} opts.option ("ip") as l_ip then
+					ip_address := l_ip.as_string_8
+				end
 				if attached {INTEGER} opts.option ("port") as l_port then
 					port_number := l_port
 				elseif
@@ -89,6 +92,9 @@ feature -- Execution
 							 ", %Nand reply Hello World for any request such as http://localhost:" + port_number.out + "/" + base_url + "%N")
 					end
 				end
+				if attached ip_address as l_ip_address then
+					conn.configuration.set_http_server_ip (l_ip_address)
+				end
 				conn.configuration.http_server_port := port_number
 				conn.launch
 			end
@@ -97,6 +103,8 @@ feature -- Execution
 feature {NONE} -- Implementation
 
 	port_number: INTEGER
+
+	ip_address: detachable STRING
 
 	base_url: READABLE_STRING_8
 

@@ -26,6 +26,7 @@ feature -- Access
 	Server_details : STRING = "Server : NINO Eiffel Server"
 
 	document_root: STRING assign set_document_root
+	http_server_ip: detachable STRING
 	http_server_port: INTEGER assign set_http_server_port
 	max_tcp_clients: INTEGER assign set_max_tcp_clients
 	socket_accept_timeout: INTEGER assign set_socket_accept_timeout
@@ -36,6 +37,11 @@ feature -- Access
 			-- Display verbose message to the output?
 
 feature -- Element change
+
+	set_http_server_ip (v: attached like http_server_ip)
+		do
+			http_server_ip := v
+		end
 
 	set_http_server_port (v: like http_server_port)
 		do
@@ -74,6 +80,6 @@ feature -- Element change
 		end
 
 note
-	copyright: "2011-2011, Javier Velilla and others"
+	copyright: "2011-2012, Javier Velilla and others"
 	license: "Eiffel Forum License v2 (see http://www.eiffel.com/licensing/forum.txt)"
 end
