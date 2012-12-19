@@ -33,6 +33,8 @@ inherit
 	REFACTORING_HELPER
 	SHARED_ORDER_VALIDATION
 
+	WSF_SELF_DOCUMENTED_HANDLER
+
 feature -- execute
 
 	uri_execute (req: WSF_REQUEST; res: WSF_RESPONSE)
@@ -51,18 +53,31 @@ feature -- API DOC
 
 	api_doc : STRING = "URI:/order METHOD: POST%N URI:/order/{orderid} METHOD: GET, PUT, DELETE%N"
 
+
+feature -- Documentation
+
+	mapping_documentation (m: WSF_ROUTER_MAPPING; a_request_methods: detachable WSF_REQUEST_METHODS): WSF_ROUTER_MAPPING_DOCUMENTATION
+		do
+			create Result.make (m)
+			if a_request_methods /= Void then
+				if a_request_methods.has_method_post then
+					Result.add_description ("URI:/order METHOD: POST")
+				elseif
+					a_request_methods.has_method_get
+					or a_request_methods.has_method_put
+					or a_request_methods.has_method_delete
+				then
+					Result.add_description ("URI:/order/{orderid} METHOD: GET, PUT, DELETE")
+				end
+			end
+		end
+
 feature -- HTTP Methods
 
 	do_get (req: WSF_REQUEST; res: WSF_RESPONSE)
-			-- Using GET to retrieve resource information.
-			-- If the GET request is SUCCESS, we response with
-			-- 200 OK, and a representation of the order
-			-- If the GET request is not SUCCESS, we response with
-			-- 404 Resource not found
-			-- If is a Condition GET and the resource does not change we send a
-			-- 304, Resource not modifed
+			-- <Precursor>
 		local
-			id :  STRING
+			id:  STRING
 		do
 			if attached req.orig_path_info as orig_path then
 				id := get_order_id_from_path (orig_path)
@@ -93,7 +108,7 @@ feature -- HTTP Methods
 			end
 		end
 
-	compute_response_get (req: WSF_REQUEST; res: WSF_RESPONSE; l_order : ORDER)
+	compute_response_get (req: WSF_REQUEST; res: WSF_RESPONSE; l_order: ORDER)
 		local
 			h: HTTP_HEADER
 			l_msg : STRING

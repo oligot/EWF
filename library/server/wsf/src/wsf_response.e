@@ -13,6 +13,8 @@ note
 			]"
 	date: "$Date$"
 	revision: "$Revision$"
+	EIS: "name=Hypertext Transfer Protocol -- HTTP/1.1 ", "protocol=URI", "src=http://www.w3.org/Protocols/rfc2616/rfc2616.html"
+	EIS: "name=Chunked Transfer Coding", "protocol=URI", "src=http://www.w3.org/Protocols/rfc2616/rfc2616-sec3.html#sec3.6.1"
 
 class
 	WSF_RESPONSE
@@ -181,7 +183,7 @@ feature {NONE} -- Implementation
 			transfered_content_length := transfered_content_length + n.to_natural_64
 		end
 
-feature -- Output operation
+feature -- Body
 
 	put_character (c: CHARACTER_8)
 			-- Send the character `c'
@@ -210,54 +212,80 @@ feature -- Output operation
 			increment_transfered_content_length (a_end_index - a_begin_index + 1)
 		end
 
-	put_chunk (s: READABLE_STRING_8; a_extension: detachable READABLE_STRING_8)
-			-- Write chunk non empty `s'
-			-- Note: that you should have header
-			-- "Transfer-Encoding: chunked"
+feature -- Chunk body
+
+	put_chunk (a_content: READABLE_STRING_8; a_ext: detachable READABLE_STRING_8)
+			-- Write chunk non empty `a_content'
+			-- with optional extension `a_ext': chunk-extension= *( ";" chunk-ext-name [ "=" chunk-ext-val ] )
+			-- Note: that you should have header "Transfer-Encoding: chunked"
 		require
-			s_not_empty: s /= Void and then not s.is_empty
+			a_content_not_empty: a_content /= Void and then not a_content.is_empty
 			message_writable: message_writable
-			valid_chunk_extension: a_extension /= Void implies not a_extension.has ('%N') and not not a_extension.has ('%R')
+			valid_chunk_extension: (a_ext /= Void and then not a_ext.is_empty) implies
+						( a_ext.starts_with (";") and not a_ext.has ('%N') and not not a_ext.has ('%R') )
 		local
 			l_chunk_size_line: STRING_8
 			i: INTEGER
 		do
-			if s.is_empty then
-					-- Should not occur due to precondition,
-					-- but let's handle the case for backward compatibility reason.
-				put_chunk_end
-			else
-					--| Remove all left '0'
-				l_chunk_size_line := s.count.to_hex_string
-				from
-					i := 1
-				until
-					l_chunk_size_line[i] /= '0'
-				loop
-					i := i + 1
-				end
-				if i > 1 then
-					l_chunk_size_line := l_chunk_size_line.substring (i, l_chunk_size_line.count)
-				end
-
-				if a_extension /= Void then
-					l_chunk_size_line.append_character (';')
-					l_chunk_size_line.append (a_extension)
-				end
-				l_chunk_size_line.append ({HTTP_CONSTANTS}.crlf)
-				put_string (l_chunk_size_line)
-				put_string (s)
-				put_string ({HTTP_CONSTANTS}.crlf)
-				flush
-				increment_transfered_content_length (s.count)
+				--| Remove all left '0'
+			l_chunk_size_line := a_content.count.to_hex_string
+			from
+				i := 1
+			until
+				l_chunk_size_line[i] /= '0'
+			loop
+				i := i + 1
 			end
+			if i > 1 then
+				l_chunk_size_line := l_chunk_size_line.substring (i, l_chunk_size_line.count)
+			end
+
+			if a_ext /= Void then
+				l_chunk_size_line.append (a_ext)
+			end
+			l_chunk_size_line.append ({HTTP_CONSTANTS}.crlf)
+
+
+			wgi_response.put_string (l_chunk_size_line)
+			put_string (a_content)
+			wgi_response.put_string ({HTTP_CONSTANTS}.crlf)
+			flush
+		ensure
+			transfered_content_length =  old transfered_content_length + a_content.count.to_natural_64
+		end
+
+	put_custom_chunk_end (a_ext: detachable READABLE_STRING_8; a_trailer: detachable READABLE_STRING_8)
+			-- Put end of chunked content,
+			-- with optional extension `a_ext': chunk-extension= *( ";" chunk-ext-name [ "=" chunk-ext-val ] )
+			-- and with optional trailer `a_trailer' : trailer= *(entity-header CRLF)
+		local
+			l_chunk_size_line: STRING_8
+		do
+			-- Chunk end
+			create l_chunk_size_line.make (1)
+			l_chunk_size_line.append_integer (0)
+
+			if a_ext /= Void then
+				l_chunk_size_line.append (a_ext)
+			end
+			l_chunk_size_line.append ({HTTP_CONSTANTS}.crlf)
+			wgi_response.put_string (l_chunk_size_line)
+
+			-- Optional trailer
+			if a_trailer /= Void and then not a_trailer.is_empty then
+				wgi_response.put_string (a_trailer)
+			end
+
+			-- Final CRLF
+			wgi_response.put_string ({HTTP_CONSTANTS}.crlf)
+			flush
 		end
 
 	put_chunk_end
 			-- Put end of chunked content
+			-- without any optional trailer.
 		do
-			put_string ("0" + {HTTP_CONSTANTS}.crlf)
-			flush
+			put_custom_chunk_end (Void, Void)
 		end
 
 	flush

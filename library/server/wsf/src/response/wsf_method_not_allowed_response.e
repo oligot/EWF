@@ -1,12 +1,12 @@
 note
 	description: "[
-				This class is used to report a 404 Not found page
+				This class is used to report a 405 Method not allowed response
 		]"
 	date: "$Date$"
 	revision: "$Revision$"
 
 class
-	WSF_NOT_FOUND_RESPONSE
+	WSF_METHOD_NOT_ALLOWED_RESPONSE
 
 inherit
 	WSF_RESPONSE_MESSAGE
@@ -22,6 +22,7 @@ feature {NONE} -- Initialization
 		do
 			request := req
 			create header.make
+			create suggested_methods
 			create suggested_items.make (0)
 		end
 
@@ -33,6 +34,10 @@ feature -- Header
 	request: WSF_REQUEST
 			-- Associated request.
 
+	suggested_methods: WSF_REQUEST_METHODS
+			-- Optional suggestions
+			-- First is the default.
+
 	suggested_items: ARRAYED_LIST [TUPLE [location: detachable READABLE_STRING_8; text: detachable READABLE_STRING_GENERAL; description: detachable READABLE_STRING_GENERAL]]
 			-- Optional suggestions
 			-- First is the default.
@@ -42,6 +47,12 @@ feature -- Header
 			-- Displayed as extra content
 
 feature -- Element change
+
+	set_suggested_methods (m: like suggested_methods)
+			-- Set `suggested_methods' to `m'
+		do
+			suggested_methods := m
+		end
 
 	add_suggested_location (a_loc: READABLE_STRING_8; a_title: detachable READABLE_STRING_GENERAL; a_description: detachable READABLE_STRING_GENERAL)
 			-- Add `a_loc' to `suggested_items'
@@ -71,15 +82,22 @@ feature {WSF_RESPONSE} -- Output
 			h: like header
 		do
 			h := header
-			res.set_status_code ({HTTP_STATUS_CODE}.not_found)
+			res.set_status_code ({HTTP_STATUS_CODE}.method_not_allowed)
+
+			if attached suggested_methods as lst and then not lst.is_empty then
+				h.put_allow (lst)
+			end
+
+			s := "Not allowed"
 
 			if request.is_content_type_accepted ({HTTP_MIME_TYPES}.text_html) then
 				s := "<html lang=%"en%"><head>"
 				s.append ("<title>")
 				s.append (html_encoder.encoded_string (request.request_uri))
-				s.append ("Error 404 (Not Found)")
+				s.append ("Error 405 (Method Not Allowed)!!")
 				s.append ("</title>%N")
-				s.append ("[
+				s.append (
+					"[
 						<style type="text/css">
 						div#header {color: #fff; background-color: #000; padding: 20px; width: 100%; text-align: center; font-size: 2em; font-weight: bold;}
 						div#message { margin: 40px; width: 100%; text-align: center; font-size: 1.5em; }
@@ -93,15 +111,28 @@ feature {WSF_RESPONSE} -- Output
 						</style>
 						</head>
 						<body>
-						<div id="header">Error 404 (Not Found)</div>
-						]")
+						<div id="header">Error 405 (Method Not Allowed)!!</div>
+					]")
 				s.append ("<div id=%"logo%">")
 				s.append ("<div class=%"outter%"> ")
 				s.append ("<div class=%"inner1%"></div>")
 				s.append ("<div class=%"inner2%"></div>")
 				s.append ("</div>")
-				s.append ("Error 404 (Not Found)</div>")
-				s.append ("<div id=%"message%">Error 404 (Not Found): <code>" + html_encoder.encoded_string (request.request_uri) + "</code></div>")
+				s.append ("Error 405 (Method Not Allowed)</div>")
+				s.append ("<div id=%"message%">Error 405 (Method Not Allowed): the request method <code>")
+				s.append (request.request_method)
+				s.append ("</code> is inappropriate for the URL for <code>" + html_encoder.encoded_string (request.request_uri) + "</code>.</div>")
+				if attached suggested_methods as lst and then not lst.is_empty then
+					s.append ("<div id=%"suggestions%"><strong>Allowed methods:</strong>")
+					across
+						lst as c
+					loop
+						s.append (" ")
+						s.append (c.item)
+					end
+					s.append ("%N")
+				end
+
 				if attached suggested_items as lst and then not lst.is_empty then
 					s.append ("<div id=%"suggestions%"><strong>Perhaps your are looking for:</strong><ul>")
 					from
@@ -142,15 +173,26 @@ feature {WSF_RESPONSE} -- Output
 					s.append ("</div>%N")
 				end
 
+
 				s.append ("<div id=%"footer%"></div>")
 				s.append ("</body>%N")
 				s.append ("</html>%N")
 
 				h.put_content_type_text_html
 			else
-				s := "Error 404 (Not Found): "
-				s.append (request.request_uri)
-				s.append_character ('%N')
+				s := "Error 405 (Method Not Allowed): the request method "
+				s.append (request.request_method)
+				s.append (" is inappropriate for the URL for '" + html_encoder.encoded_string (request.request_uri) + "'.%N")
+				if attached suggested_methods as lst and then not lst.is_empty then
+					s.append ("Allowed methods:")
+					across
+						lst as c
+					loop
+						s.append (" ")
+						s.append (c.item)
+					end
+					s.append ("%N")
+				end
 				if attached suggested_items as lst and then not lst.is_empty then
 					s.append ("%NPerhaps your are looking for:%N")
 					from
@@ -188,9 +230,9 @@ feature {WSF_RESPONSE} -- Output
 					s.append (b)
 					s.append ("%N")
 				end
-
 				h.put_content_type_text_plain
 			end
+
 			h.put_content_length (s.count)
 			res.put_header_text (h.string)
 			res.put_string (s)

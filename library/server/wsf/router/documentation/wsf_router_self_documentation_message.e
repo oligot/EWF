@@ -191,14 +191,14 @@ feature {WSF_RESPONSE} -- Output
 			res.put_string (l_description)
 		end
 
-	append_documentation_to (s: STRING_8; m: WSF_ROUTER_MAPPING; meths: detachable WSF_ROUTER_METHODS)
+	append_documentation_to (s: STRING_8; m: WSF_ROUTER_MAPPING; meths: detachable WSF_REQUEST_METHODS)
 		local
 			l_url: detachable STRING_8
 			l_base_url: detachable READABLE_STRING_8
 			l_doc: detachable WSF_ROUTER_MAPPING_DOCUMENTATION
 		do
 			if attached {WSF_SELF_DOCUMENTED_ROUTER_MAPPING} m as l_doc_mapping then
-				l_doc := l_doc_mapping.documentation
+				l_doc := l_doc_mapping.documentation (meths)
 			end
 			if l_doc = Void or else not l_doc.is_hidden then
 
@@ -240,6 +240,8 @@ feature {WSF_RESPONSE} -- Output
 						s.append_character (' ')
 					end
 					s.append_character (']')
+				else
+					s.append (" [ * ]") -- when no request methods are precised, it accepts any methods.
 				end
 
 				s.append (" <em class=%"mappingdoc%">" + html_encoder.encoded_string (m.description) + "</em> ")

@@ -48,10 +48,11 @@ feature -- Execution
 	execute_default (req: WSF_REQUEST; res: WSF_RESPONSE)
 			-- Default procedure
 		local
-			not_found: WSF_NOT_FOUND_RESPONSE
+			msg: WSF_DEFAULT_ROUTER_RESPONSE
 		do
-			create not_found.make (req)
-			res.send (not_found)
+			create msg.make_with_router (req, router)
+			msg.set_documentation_included (True)
+			res.send (msg)
 		end
 
 feature -- Access

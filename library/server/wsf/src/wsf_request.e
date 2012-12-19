@@ -144,12 +144,26 @@ feature -- Setting
 
 feature -- Raw input data
 
-	raw_input_data: detachable READABLE_STRING_8
+	raw_input_data: detachable IMMUTABLE_STRING_8
 			-- Raw input data is `raw_input_data_recorded' is True
 
 	set_raw_input_data (d: READABLE_STRING_8)
 		do
-			raw_input_data := d
+			if attached {IMMUTABLE_STRING_8} d as imm then
+				raw_input_data := d
+			else
+				create raw_input_data.make_from_string (d)
+			end
+		end
+
+feature -- Raw header data
+
+	raw_header_data: like meta_string_variable
+			-- Raw header data if available.
+		do
+			Result := meta_string_variable ("RAW_HEADER_DATA")
+		ensure
+			is_valid_as_string_8: Result /= Void implies Result.is_valid_as_string_8
 		end
 
 feature -- Error handling
@@ -178,6 +192,50 @@ feature -- Access: Input
 			Result := wgi_request.is_chunked_input
 		end
 
+	read_input_data_into (buf: STRING)
+			-- retrieve the content from the `input' stream into `s'
+			-- warning: if the input data has already been retrieved
+			--          you might not get anything
+		local
+			l_input: WGI_INPUT_STREAM
+			n: INTEGER
+			s: STRING
+		do
+			if raw_input_data_recorded and then attached raw_input_data as d then
+				buf.copy (d)
+			else
+				l_input := input
+				if is_chunked_input then
+					from
+						n := 8_192
+					until
+						n = 0
+					loop
+						l_input.read_string (n)
+						s := l_input.last_string
+						if s.count = 0 then
+							n := 0
+						else
+							if s.count < n then
+								n := 0
+							end
+							buf.append (s)
+						end
+					end
+				else
+					n := content_length_value.as_integer_32
+					if n > 0 then
+						buf.resize (buf.count + n)
+						n := l_input.read_to_string (buf, buf.count + 1, n)
+						check n = content_length_value.as_integer_32 end
+					end
+				end
+				if raw_input_data_recorded then
+					set_raw_input_data (buf)
+				end
+			end
+		end
+
 feature -- Helper
 
 	is_request_method (m: READABLE_STRING_GENERAL): BOOLEAN
@@ -196,6 +254,36 @@ feature -- Helper
 			-- Is Current a GET request method?
 		do
 			Result := request_method.is_case_insensitive_equal ({HTTP_REQUEST_METHODS}.method_get)
+		end
+
+	is_content_type_accepted (a_content_type: READABLE_STRING_GENERAL): BOOLEAN
+			-- Does client accepts content_type for the response?
+			--| Based on header "Accept:" that can be for instance
+			--| 	text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+		local
+			i, j: INTEGER
+		do
+			if attached http_accept as l_accept then
+				i := l_accept.substring_index (a_content_type, 1)
+				if i > 0 then
+					-- contains the text, now check if this is the exact text
+					if
+						i = 1	-- At the beginning of text
+						or else l_accept[i-1].is_space -- preceded by space
+						or else l_accept[i-1] = ',' -- preceded by other mime type
+					then
+						j := i + a_content_type.count
+						if l_accept.valid_index (j) then
+							Result := l_accept[j] = ',' -- followed by other mime type
+										or else l_accept[j] = ';' -- followed by quality  ;q=...
+										or else l_accept[j].is_space -- followed by space
+						else -- end of text
+							Result := True
+						end
+					end
+				end
+				Result := l_accept.has_substring (a_content_type)
+			end
 		end
 
 feature -- Eiffel WGI access
@@ -825,6 +913,13 @@ feature -- HTTP_*
 			Result := wgi_request.http_connection
 		end
 
+	http_expect: detachable READABLE_STRING_8
+			-- The Expect request-header field is used to indicate that particular server behaviors are required by the client.
+			-- Example: '100-continue'.
+		do
+			Result := wgi_request.http_expect
+		end
+
 	http_host: detachable READABLE_STRING_8
 			-- Contents of the Host: header from the current wgi_request, if there is one.
 		do
@@ -879,13 +974,26 @@ feature -- Extra CGI environment variables
 
 	request_time: detachable DATE_TIME
 			-- Request time (UTC)
+		local
+			i: like request_time_stamp
+		do
+			i := request_time_stamp
+			if i > 0 then
+				Result := date_time_utilities.unix_time_stamp_to_date_time (i)
+			end
+		end
+
+	request_time_stamp: INTEGER_64
+			-- Request time stamp (UTC)	 (unix time stamp)
 		do
 			if
 				attached {WSF_STRING} meta_variable ({WSF_META_NAMES}.request_time) as t and then
 				t.value.is_integer_64
 			then
-				Result := date_time_utilities.unix_time_stamp_to_date_time (t.value.to_integer_64)
+				Result := t.value.to_integer_64
 			end
+		ensure
+			Result = 0 implies meta_variable ({WSF_META_NAMES}.request_time) = Void
 		end
 
 feature -- Cookies

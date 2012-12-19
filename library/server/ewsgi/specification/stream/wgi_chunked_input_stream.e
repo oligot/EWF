@@ -2,6 +2,7 @@ note
 	description: "Summary description for {WGI_CHUNKED_INPUT_STREAM}."
 	date: "$Date$"
 	revision: "$Revision$"
+	EIS: "name=Chunked Transfer Coding", "protocol=URI", "src=http://www.w3.org/Protocols/rfc2616/rfc2616-sec3.html#sec3.6.1"
 
 class
 	WGI_CHUNKED_INPUT_STREAM
@@ -17,7 +18,7 @@ feature {NONE} -- Implementation
 	make (an_input: like input)
 		do
 			create last_string.make_empty
-			create last_chunk.make_empty
+			create last_chunk_data.make_empty
 			last_chunk_size := 0
 			index := 0
 			chunk_lower := 0
@@ -34,48 +35,59 @@ feature -- Input
 		do
 			index := index + 1
 			if index > chunk_upper then
-				read_chunk
-				if last_chunk = Void then
-					read_trailer
+				read_chunk_block
+				if last_chunk_data = Void then
+					read_trailer_and_crlf
 				end
 			end
-			last_character := last_chunk.item (index)
+			last_character := last_chunk_data.item (index)
 		end
 
 	read_string (nb: INTEGER)
 			-- Read the next `nb' characters and
 			-- make the string result available in `last_string'
+			--| Chunked-Body   = *chunk
+			--| last-chunk
+			--| trailer
+			--| CRLF
 		local
 			i: like index
 		do
 			last_string.wipe_out
-			if last_chunk_size = 0 then
-				read_chunk
-			end
-			from
-				index := index + 1
-				i := index
-			until
-				i - index + 1 = nb or last_chunk_size = 0
-			loop
-				if i + nb - 1 <= chunk_upper then
-					last_string.append (last_chunk.substring (i, i + nb - 1))
-					i := i + nb - 1
-				else
-					-- Need to read new chunk
-					-- first get all available data from current chunk
-					if i <= chunk_upper then
-						last_string.append (last_chunk.substring (i, chunk_upper))
-						i := chunk_upper
-					end
-					-- then continue
-					read_chunk
+			if last_trailer /= Void then
+				-- trailer already reached, no more data
+				check input.end_of_input end
+			else
+				if last_chunk_size = 0 then
+					read_chunk_block
 				end
+				from
+					index := index + 1
+					i := index
+				until
+					i - index + 1 = nb or last_chunk_size = 0
+				loop
+					if i + nb - 1 <= chunk_upper then
+						last_string.append (last_chunk_data.substring (i - chunk_lower + 1, i - chunk_lower + 1 + nb - 1))
+						i := i + nb - 1
+					else
+						-- Need to read new chunk
+						-- first get all available data from current chunk
+						if i <= chunk_upper then
+							last_string.append (last_chunk_data.substring (i - chunk_lower + 1, chunk_upper - chunk_lower + 1))
+							i := chunk_upper
+						end
+						-- then continue
+						read_chunk_block
+						i := i + 1
+						check i = chunk_lower end
+					end
+				end
+				if last_chunk_size = 0 then
+					read_trailer_and_crlf
+				end
+				index := i
 			end
-			if last_chunk_size = 0 then
-				read_trailer
-			end
-			index := i
 		end
 
 feature -- Access
@@ -90,6 +102,34 @@ feature -- Access
 
 	last_character: CHARACTER_8
 			-- Last item read.
+
+feature -- Access: chunk			
+
+	last_chunk_size: INTEGER
+			-- Last chunk size.
+
+	last_chunk_data: STRING_8
+			-- Last chunk data.
+
+	last_trailer: detachable STRING_8
+			-- Last optional trailer content if any.
+
+	last_chunk_extension: detachable STRING_8
+			-- Last optional extension if any
+
+feature -- Chunk reading
+
+	read_chunk
+			-- Read next chunk
+			-- WARNING: do not mix read_chunk calls and read_string/read_character
+			-- this would mess up the traversal.
+			-- note: modify last_chunk_size, last_chunk, last_extension
+		do
+			read_chunk_block
+			if last_chunk_size = 0 then
+				read_trailer_and_crlf
+			end
+		end
 
 feature -- Status report
 
@@ -108,37 +148,52 @@ feature -- Status report
 feature {NONE} -- Parser
 
 	index, chunk_lower, chunk_upper: INTEGER
-	last_chunk_size: INTEGER
-	last_chunk: STRING_8
-
 	tmp_hex_chunk_size: STRING_8
 
-	read_chunk
+	read_chunk_block
+			-- Read next chunk
+			-- WARNING: do not mix read_chunk calls and read_string/read_character
+			-- this would mess up the traversal.
+		local
+			l_input: like input
 		do
-			chunk_lower := chunk_upper + 1
-			last_chunk.wipe_out
-			last_chunk_size := 0
-			read_chunk_size
-			if last_chunk_size > 0 then
-				chunk_upper := chunk_upper + last_chunk_size
-				read_chunk_data
+			if input.end_of_input then
+			else
+				chunk_lower := chunk_upper + 1
+				last_chunk_data.wipe_out
+				last_chunk_size := 0
+				read_chunk_size
+				if last_chunk_size > 0 then
+					chunk_upper := chunk_upper + last_chunk_size
+					read_chunk_data
+					check last_chunk_data.count = last_chunk_size end
+
+					l_input := input
+					l_input.read_character
+					check l_input.last_character = '%R' end
+					l_input.read_character
+					check l_input.last_character = '%N' end
+				end
 			end
 		ensure
-			attached last_chunk as l_last_chunk implies l_last_chunk.count = chunk_upper - chunk_lower
+			attached last_chunk_data as l_last_chunk implies l_last_chunk.count = chunk_upper - chunk_lower + 1
 		end
 
 	read_chunk_data
 		require
-			last_chunk.is_empty
+			last_chunk_data.is_empty
 			last_chunk_size > 0
 		local
 			l_input: like input
 		do
+			debug ("wgi")
+				print (" Read chunk data ("+ last_chunk_size.out +") %N")
+			end
 			l_input := input
 			l_input.read_string (last_chunk_size)
-			last_chunk := l_input.last_string
+			last_chunk_data := l_input.last_string
 		ensure
-			last_chunk_attached: attached last_chunk as el_last_chunk
+			last_chunk_attached: attached last_chunk_data as el_last_chunk
 			last_chunk_size_ok: el_last_chunk.count = last_chunk_size
 		end
 
@@ -151,6 +206,10 @@ feature {NONE} -- Parser
 			hex : HEXADECIMAL_STRING_TO_INTEGER_CONVERTER
 			l_input: like input
 		do
+			debug ("wgi")
+				print (" Read chunk size: ")
+			end
+
 			l_input := input
 			from
 				l_input.read_character
@@ -158,6 +217,9 @@ feature {NONE} -- Parser
 				eol
 			loop
 				c := l_input.last_character
+				debug ("wgi")
+					print (c.out)
+				end
 				inspect c
 				when '%R' then
 					-- We are in the end of the line, we need to read the next character to start the next line.
@@ -183,56 +245,92 @@ feature {NONE} -- Parser
 				end
 			end
 			tmp_hex_chunk_size.wipe_out
+
+			debug ("wgi")
+				print ("%N Chunk size = " + last_chunk_size.out + "%N")
+			end
 		end
 
 	read_extension_chunk
 		local
 			l_input: like input
+			s: STRING_8
 		do
 			l_input := input
-			debug
+			debug ("wgi")
 				print (" Reading extension chunk ")
 			end
+			create s.make_empty
 			from
 				l_input.read_character
+				s.append_character (l_input.last_character)
 			until
 				l_input.last_character = '%R'
 			loop
-				debug
+				debug ("wgi")
 					print (l_input.last_character)
 				end
 				l_input.read_character
+				s.append_character (l_input.last_character)
+			end
+			s.remove_tail (1)
+			if s.is_empty then
+				last_chunk_extension := Void
+			else
+				last_chunk_extension := s
 			end
 		end
 
-	read_trailer
+	read_trailer_and_crlf
+			-- trailer = *(entity-header CRLF)
+			-- CRLF
 		local
 			l_input: like input
+			l_line_size: INTEGER
+			s: STRING_8
 		do
+			create s.make_empty
 			l_input := input
 			if not l_input.end_of_input then
-				debug
+				debug ("wgi")
 					print (" Reading trailer ")
 				end
 				from
-					l_input.read_character
+					l_line_size := 1 -- Dummy value /= 0
 				until
-					l_input.last_character = '%R'
+					l_line_size = 0
 				loop
-					debug
-						print (l_input.last_character)
+					l_line_size := 0
+					from
+						l_input.read_character
+						s.append_character (l_input.last_character)
+					until
+						l_input.last_character = '%R'
+					loop
+						l_line_size := l_line_size + 1
+						debug ("wgi")
+							print (l_input.last_character)
+						end
+						l_input.read_character
+						s.append_character (l_input.last_character)
 					end
+					s.remove_tail (1)
+					-- read the LF
 					l_input.read_character
+					check l_input.last_character = '%N' end
 				end
-				-- read the LF
-				l_input.read_character
+			end
+			if s.is_empty then
+				last_trailer := Void
+			else
+				last_trailer := s
 			end
 		end
 
 feature {NONE} -- Implementation
 
 	input: WGI_INPUT_STREAM
-		-- Input Stream
+			-- Input Stream
 
 ;note
 	copyright: "2011-2012, Jocelyn Fiat, Javier Velilla, Eiffel Software and others"
