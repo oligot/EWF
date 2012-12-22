@@ -39,6 +39,9 @@ feature {NONE} -- Initialization
 			base_url := ""
 
 			if attached options as opts then
+				if attached {READABLE_STRING_GENERAL} opts.option ("server_name") as l_server_name then
+					server_name := l_server_name.to_string_8
+				end
 				if attached {INTEGER} opts.option ("port") as l_port then
 					port_number := l_port
 				elseif
@@ -85,9 +88,16 @@ feature -- Execution
 				conn.configuration.set_is_verbose (verbose)
 				debug ("nino")
 					if verbose then
-						print ("Example: start a Nino web server on port " + port_number.out +
-							 ", %Nand reply Hello World for any request such as http://localhost:" + port_number.out + "/" + base_url + "%N")
+						io.error.put_string ("Launching Nino web server on port " + port_number.out)
+						if attached server_name as l_name then
+							io.error.put_string ("%N http://" + l_name + ":" + port_number.out + "/" + base_url + "%N")
+						else
+							io.error.put_string ("%N http://localhost:" + port_number.out + "/" + base_url + "%N")
+						end
 					end
+				end
+				if attached server_name as l_server_name then
+					conn.configuration.set_http_server_name (l_server_name)
 				end
 				conn.configuration.http_server_port := port_number
 				conn.launch
@@ -97,6 +107,8 @@ feature -- Execution
 feature {NONE} -- Implementation
 
 	port_number: INTEGER
+
+	server_name: detachable READABLE_STRING_8
 
 	base_url: READABLE_STRING_8
 
